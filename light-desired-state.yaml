@@ -42,7 +42,7 @@ trigger:
     event: start
     id: ha_started
 
-mode: restart
+mode: single
 
 action:
   - variables:
