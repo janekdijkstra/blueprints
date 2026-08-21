@@ -1,0 +1,108 @@
+blueprint:
+  name: Light Desired State
+  description: Syncs a light with helper state variables, and adjusts brightness based on sun position.
+  domain: automation
+  input:
+    target_light:
+      name: Target Light
+      description: The light entity to control and monitor.
+      selector:
+        entity:
+          domain: light
+    desired_state_helper:
+      name: Desired State Helper
+      description: An input_boolean helper to hold the internal state.
+      selector:
+        entity:
+          domain: input_boolean
+    desired_brightness_helper:
+      name: Desired Brightness Helper
+      description: An input_number helper to hold the internal target brightness (1-255).
+      selector:
+        entity:
+          domain: input_number
+
+trigger:
+  - platform: sun
+    event: sunset
+    id: event_sunset
+  - platform: sun
+    event: sunrise
+    id: event_sunrise
+  - platform: state
+    entity_id: !input target_light
+    id: light_changed
+  - platform: state
+    entity_id: !input desired_state_helper
+    id: state_helper_changed
+  - platform: state
+    entity_id: !input desired_brightness_helper
+    id: brightness_helper_changed
+  - platform: homeassistant
+    event: start
+    id: ha_started
+
+mode: restart
+
+action:
+  - variables:
+      brightness_entity: !input desired_brightness_helper
+  - choose:
+      - conditions:
+          - condition: trigger
+            id:
+              - event_sunset
+              - event_sunrise
+              - ha_started
+        sequence:
+          - action: input_number.set_value
+            target:
+              entity_id: !input desired_brightness_helper
+            data:
+              value: >
+                {% if is_state('sun.sun', 'above_horizon') %}
+                  255
+                {% else %}
+                  25
+                {% endif %}
+
+      - conditions:
+          - condition: trigger
+            id: light_changed
+        sequence:
+          - service: input_boolean.turn_{{ states(trigger.entity_id) }}
+            target:
+              entity_id: !input desired_state_helper
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: !input target_light
+                    state: "on"
+                sequence:
+                  - service: input_number.set_value
+                    target:
+                      entity_id: !input desired_brightness_helper
+                    data:
+                      value: "{{ state_attr(trigger.entity_id, 'brightness') | default(255, true) }}"
+
+      - conditions:
+          - condition: trigger
+            id:
+              - state_helper_changed
+              - brightness_helper_changed
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: !input desired_state_helper
+                    state: "off"
+                sequence:
+                  - action: light.turn_off
+                    target:
+                      entity_id: !input target_light
+            default:
+              - action: light.turn_on
+                target:
+                  entity_id: !input target_light
+                data:
+                  brightness: "{{ states(brightness_entity) | int(255) }}"
