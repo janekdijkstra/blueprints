@@ -75,7 +75,6 @@ mode: single
 
 triggers:
   - triggers: !input short_press_event
-    id: short_press
   - platform: state
     entity_id: !input button
     to: "on"
@@ -87,15 +86,6 @@ action:
       brightness_entity: !input desired_brightness_helper
       state_entity: !input desired_state_helper
       brightness_step: "{{ (255 * brightness_step_pct_positive | int / 100) | int }}"
-  - choose:
-      - conditions:
-          - condition: trigger
-            id: short_press
-        sequence:
-          - action: input_boolean.toggle
-            target:
-              entity_id: !input desired_state_helper
-          - stop: Short press toggled
   - wait_for_trigger:
       - platform: state
         entity_id: !input button
