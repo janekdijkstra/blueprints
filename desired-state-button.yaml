@@ -1,0 +1,167 @@
+blueprint:
+  name: Single button to control light desired state
+  domain: automation
+  input:
+    button:
+      name: Push button
+      description:
+        Entity representing a physical push button (which restores its position
+        when released). It must emit a square signal on press.
+      selector:
+        entity:
+          domain: binary_sensor
+
+    desired_state_helper:
+      name: Desired State Helper
+      description: An input_boolean helper to hold the internal state.
+      selector:
+        entity:
+          domain: input_boolean
+    desired_brightness_helper:
+      name: Desired Brightness Helper
+      description: An input_number helper to hold the internal target brightness (1-255).
+      selector:
+        entity:
+          domain: input_number
+
+    hold_threshold:
+      name: Hold threshold
+      description: Time to consider button is being held, instead of just pushed.
+      default: 0.8
+      selector:
+        number:
+          min: 0.05
+          max: 10
+          step: 0.05
+          unit_of_measurement: s
+    brightness_threshold:
+      name: Brightness threshold
+      description: If the light brightness is above this value,
+        the light is going to dim down when holding the button.
+      default: 130
+      selector:
+        number:
+          min: 0
+          max: 255
+    brightness_step_pct:
+      name: Brightness step
+      description: Percentage brightness increase/decrease in each step.
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 100
+          unit_of_measurement: "%"
+    delay_step_length:
+      name: Delay length
+      description: >-
+        Length of pause after each step.
+        MUST be larger than Transition length.
+      default: 0.2
+      selector:
+        number:
+          min: 0.1
+          max: 5
+          step: 0.01
+          unit_of_measurement: s
+
+mode: single
+
+trigger:
+  - platform: state
+    entity_id: !input button
+    to: "on"
+
+action:
+  - variables:
+      brightness_step_pct_positive: !input brightness_step_pct
+      brightness_entity: !input desired_brightness_helper
+      state_entity: !input desired_state_helper
+      brightness_step: "{{ (255 * brightness_step_pct_positive | int / 100) | int }}"
+  - wait_for_trigger:
+      - platform: state
+        entity_id: !input button
+        to: "off"
+        from: "on"
+    timeout: !input hold_threshold
+    continue_on_timeout: true
+  - choose:
+      - conditions:
+          # when no trigger came (button has not been switched back to
+          # off state during timeout) = button is being held
+          - condition: template
+            value_template: "{{ wait.trigger == none }}"
+        sequence:
+          - choose:
+              - conditions:
+                  # when brightness level is high
+                  - condition: numeric_state
+                    entity_id: !input desired_brightness_helper
+                    above: !input brightness_threshold
+                sequence:
+                  # dim down
+                  - repeat:
+                      while:
+                        - condition: and
+                          conditions:
+                            - condition: state
+                              entity_id: !input button
+                              state: "on"
+                            - condition: template
+                              value_template: "{{ states(brightness_entity) | int(0) > 0 }}"
+                      sequence:
+                        - if:
+                            - alias: If next step would not turn off the light
+                              condition: template
+                              value_template: "{{ states(brightness_entity) | int(0) > brightness_step }}"
+                          then:
+                            - action: input_number.set_value
+                              target:
+                                entity_id: !input desired_brightness_helper
+                              data:
+                                value: "{{ states(brightness_entity) | int(0) - brightness_step }}"
+                          else:
+                            - action: input_boolean.turn_off
+                              target:
+                                entity_id: !input desired_state_helper
+                            - stop: Dimmed to zero
+                        - delay: !input delay_step_length
+            default:
+              # otherwise, dim up
+              - repeat:
+                  while:
+                    - condition: and
+                      conditions:
+                        - condition: state
+                          entity_id: !input button
+                          state: "on"
+                        - condition: template
+                          value_template: "{{ states(brightness_entity) | int(0) < 255 }}"
+                  sequence:
+                    - action: input_boolean.turn_on
+                      target:
+                        entity_id: !input desired_state_helper
+                    - if:
+                        - alias: If next step would not turn the light fully on
+                          condition: template
+                          value_template: "{{ states(brightness_entity) | int(0) + brightness_step < 255 }}"
+                      then:
+                        - action: input_number.set_value
+                          target:
+                            entity_id: !input desired_brightness_helper
+                          data:
+                            value: "{{ states(brightness_entity) | int(0) + brightness_step }}"
+                      else:
+                        - action: input_number.set_value
+                          target:
+                            entity_id: !input desired_brightness_helper
+                          data:
+                            value: 255
+                        - stop: Dimmed to max
+                    - delay: !input delay_step_length
+
+    # when trigger came (button has been released within timeout)
+    default:
+      - action: input_boolean.toggle
+        target:
+          entity_id: !input desired_state_helper
