@@ -73,7 +73,7 @@ blueprint:
 
 mode: single
 
-triggers:
+trigger:
   - triggers: !input short_press_event
   - platform: state
     entity_id: !input button
