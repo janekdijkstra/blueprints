@@ -11,6 +11,12 @@ blueprint:
         entity:
           domain: binary_sensor
 
+    short_press_event:
+      name: "Short Press Event"
+      description: "Optionally you can configure a short press event to toggle the state"
+      selector:
+        trigger:
+
     desired_state_helper:
       name: Desired State Helper
       description: An input_boolean helper to hold the internal state.
@@ -67,10 +73,13 @@ blueprint:
 
 mode: single
 
-trigger:
+triggers:
+  - triggers: !input short_press_event
+    id: short_press
   - platform: state
     entity_id: !input button
     to: "on"
+    id: state_change
 
 action:
   - variables:
@@ -78,6 +87,15 @@ action:
       brightness_entity: !input desired_brightness_helper
       state_entity: !input desired_state_helper
       brightness_step: "{{ (255 * brightness_step_pct_positive | int / 100) | int }}"
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: short_press
+        sequence:
+          - action: input_boolean.toggle
+            target:
+              entity_id: !input desired_state_helper
+          - stop: Short press toggled
   - wait_for_trigger:
       - platform: state
         entity_id: !input button
@@ -91,6 +109,8 @@ action:
           # off state during timeout) = button is being held
           - condition: template
             value_template: "{{ wait.trigger == none }}"
+          - condition: trigger
+            id: state_change
         sequence:
           - choose:
               - conditions:
